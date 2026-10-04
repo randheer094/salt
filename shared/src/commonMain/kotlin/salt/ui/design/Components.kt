@@ -23,7 +23,10 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
@@ -41,6 +44,8 @@ import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Tab
+import androidx.compose.material3.TextButton
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -59,6 +64,16 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.Switch
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.SolidColor
 
 // ── Layout ────────────────────────────────────────────────────────────────
 
@@ -113,15 +128,37 @@ fun Code(text: String, modifier: Modifier = Modifier, color: Color = Color.Unspe
 
 enum class ButtonKind { Primary, Secondary, Danger }
 
+private val ControlShape = RoundedCornerShape(6.dp)
+
+/** Compact (32dp) button: primary is filled, secondary is outlined so a disabled one reads as clearly off. */
 @Composable
-fun SaltButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, kind: ButtonKind = ButtonKind.Primary, enabled: Boolean = true) =
+fun SaltButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, kind: ButtonKind = ButtonKind.Primary, enabled: Boolean = true) {
+    val m = modifier.height(32.dp)
+    val pad = PaddingValues(horizontal = 14.dp)
+    val label = @Composable { Text(text, style = MaterialTheme.typography.labelLarge, maxLines = 1) }
     when (kind) {
-        ButtonKind.Primary -> Button(onClick, modifier, enabled) { Text(text) }
-        ButtonKind.Secondary -> FilledTonalButton(onClick, modifier, enabled) { Text(text) }
+        ButtonKind.Primary -> Button(onClick, m, enabled, shape = ControlShape, contentPadding = pad) { label() }
+        ButtonKind.Secondary -> OutlinedButton(
+            onClick, m, enabled, shape = ControlShape, contentPadding = pad,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = if (enabled) 1f else 0.5f)),
+        ) { label() }
         ButtonKind.Danger -> Button(
-            onClick, modifier, enabled,
+            onClick, m, enabled, shape = ControlShape, contentPadding = pad,
             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError),
-        ) { Text(text) }
+        ) { label() }
+    }
+}
+
+/** On/off row control. [checked] null means the state is still loading: the switch holds its place, disabled. */
+@Composable
+fun SaltSwitch(checked: Boolean?, onChange: (Boolean) -> Unit, label: String, modifier: Modifier = Modifier, hint: String = "", enabled: Boolean = true) =
+    HStack(modifier.fillMaxWidth(), Space.md) {
+        VStack(Modifier.weight(1f), Space.xs) {
+            Label(label)
+            if (hint.isNotBlank()) Label(hint, kind = TextStyleKind.Caption)
+        }
+        Label(when (checked) { true -> "On"; false -> "Off"; null -> "…" }, kind = TextStyleKind.Caption, tone = if (checked == true) Tone.Success else null)
+        Switch(checked == true, onChange, enabled = enabled && checked != null)
     }
 
 /** Destructive action that needs a second click to fire. */
@@ -154,16 +191,34 @@ fun SaltTextField(
     minLines: Int = 1,
     mono: Boolean = false,
     onEnter: (() -> Unit)? = null,
-) = OutlinedTextField(
-    value, onChange,
-    modifier = if (onEnter != null) modifier.onEnter(onEnter) else modifier,
-    label = { Text(label) },
-    supportingText = hint?.takeIf { it.isNotBlank() }?.let { { Text(it) } },
-    isError = error,
-    singleLine = singleLine,
-    minLines = minLines,
-    textStyle = if (mono) MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace) else MaterialTheme.typography.bodyMedium,
-)
+    /** True puts the label above the field (forms); false uses it as the placeholder (toolbars, filters). */
+    labelAbove: Boolean = false,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val style = (if (mono) MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace) else MaterialTheme.typography.bodyMedium)
+        .copy(color = scheme.onSurface)
+    var focused by remember { mutableStateOf(false) }
+    val border = if (error) scheme.error else if (focused) scheme.primary else scheme.outlineVariant
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+        if (labelAbove) Text(label, style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant)
+        BasicTextField(
+            value, onChange,
+            Modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused }.let { if (onEnter != null) it.onEnter(onEnter) else it },
+            singleLine = singleLine, minLines = minLines, textStyle = style, cursorBrush = SolidColor(scheme.primary),
+            decorationBox = { inner ->
+                Box(
+                    Modifier.fillMaxWidth().heightIn(min = 34.dp).background(scheme.surfaceContainerLowest, ControlShape)
+                        .border(if (focused) 2.dp else 1.dp, border, ControlShape).padding(horizontal = 10.dp, vertical = 8.dp),
+                    contentAlignment = if (singleLine) Alignment.CenterStart else Alignment.TopStart,
+                ) {
+                    if (value.isEmpty() && !labelAbove) Text(label, style = style.copy(color = scheme.onSurfaceVariant.copy(alpha = 0.7f)), maxLines = 1)
+                    inner()
+                }
+            },
+        )
+        hint?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = if (error) scheme.error else scheme.onSurfaceVariant) }
+    }
+}
 
 /** Whole row is the click target, not just the box. */
 @Composable
@@ -205,7 +260,7 @@ fun Panel(modifier: Modifier = Modifier, title: String? = null, content: @Compos
 fun Badge(text: String, tone: Tone = Tone.Neutral, modifier: Modifier = Modifier) {
     val c = SaltTheme.toneColor(tone)
     Text(
-        text, modifier.background(c.copy(alpha = 0.14f), RoundedCornerShape(50)).padding(horizontal = 8.dp, vertical = 2.dp),
+        text, modifier.background(c.copy(alpha = 0.14f), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
         style = MaterialTheme.typography.labelSmall, color = c, maxLines = 1,
     )
 }
@@ -226,6 +281,22 @@ fun EmptyState(text: String, modifier: Modifier = Modifier) =
         Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
     }
 
+/** Heading that shows or hides its content; content is composed only while open. */
+@Composable
+fun Section(title: String, expanded: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
+    var open by remember { mutableStateOf(expanded) }
+    Column {
+        Divider()
+        HStack(Modifier.fillMaxWidth().toggleable(open, role = Role.Button, onValueChange = { open = it }).padding(vertical = Space.md), Space.sm) {
+            val turn by animateFloatAsState(if (open) 90f else 0f)
+            Text("›", Modifier.rotate(turn), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(title, style = MaterialTheme.typography.titleSmall)
+        }
+        // Size animates instead of snapping, so opening a block never jolts what sits below it.
+        Box(Modifier.fillMaxWidth().animateContentSize()) { if (open) VStack(Modifier.fillMaxWidth(), content = content) }
+    }
+}
+
 @Composable
 fun Divider(modifier: Modifier = Modifier) = HorizontalDivider(modifier, color = MaterialTheme.colorScheme.outlineVariant)
 
@@ -238,6 +309,39 @@ fun Tabs(titles: List<String>, selected: Int, onSelect: (Int) -> Unit, modifier:
         titles.forEachIndexed { i, t -> Tab(selected == i, { onSelect(i) }, text = { Text(t, maxLines = 1) }) }
     }
 
+/** Grouped vertical list for a section with many tools: quiet group names, the current item marked by an accent bar. */
+@Composable
+fun SideNav(groups: List<Pair<String?, List<String>>>, selected: String, onSelect: (String) -> Unit, modifier: Modifier = Modifier) {
+    var open by remember { mutableStateOf(true) }
+    // Collapsed keeps the first two letters of each tool, so the list stays usable at 48dp.
+    val width by animateDpAsState(if (open) 208.dp else 48.dp)
+    val scheme = MaterialTheme.colorScheme
+    Column(modifier.width(width).fillMaxHeight().background(scheme.surfaceContainerLow).verticalScroll(rememberScrollState()).padding(vertical = Space.sm)) {
+        Box(Modifier.fillMaxWidth().height(32.dp).toggleable(open, role = Role.Button, onValueChange = { open = it }), contentAlignment = if (open) Alignment.CenterEnd else Alignment.Center) {
+            Text(if (open) "‹  Hide" else "›", Modifier.padding(horizontal = Space.md), style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant, maxLines = 1)
+        }
+        groups.forEach { (group, items) ->
+            if (open) group?.let { Text(it, Modifier.padding(start = Space.lg, top = Space.md, bottom = Space.xs), style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant, maxLines = 1) }
+            else Spacer(Modifier.height(Space.md))
+            items.forEach { item ->
+                val on = item == selected
+                Row(
+                    Modifier.fillMaxWidth().height(34.dp).background(if (on) scheme.primary.copy(alpha = 0.12f) else Color.Transparent)
+                        .selectable(on, role = Role.Tab, onClick = { onSelect(item) }),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.width(3.dp).fillMaxHeight().background(if (on) scheme.primary else Color.Transparent))
+                    Text(
+                        if (open) item else item.take(2), Modifier.padding(start = if (open) Space.lg - 3.dp else Space.md), maxLines = 1,
+                        style = MaterialTheme.typography.bodyMedium, fontWeight = if (on) FontWeight.SemiBold else null,
+                        color = if (on) scheme.primary else scheme.onSurface,
+                    )
+                }
+            }
+        }
+    }
+}
+
 /** App frame: navigation rail for the top-level sections, a top bar, then the content. */
 @Composable
 fun AppShell(
@@ -249,7 +353,8 @@ fun AppShell(
     topBarTrailing: @Composable () -> Unit,
     content: @Composable ColumnScope.() -> Unit,
 ) = Row(Modifier.fillMaxSize()) {
-    NavigationRail(containerColor = MaterialTheme.colorScheme.surfaceContainer, header = {
+    // A section served on its own path has nothing to switch to, so no rail.
+    if (sections.size > 1) NavigationRail(containerColor = MaterialTheme.colorScheme.surfaceContainer, header = {
         Text(brand, Modifier.padding(vertical = Space.lg), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
     }) {
         sections.forEachIndexed { i, (glyph, title) ->

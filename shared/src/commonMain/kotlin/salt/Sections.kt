@@ -44,6 +44,7 @@ object Sections {
             SettingDef("sdkPath", "SDK path", SettingType.TEXT, description = "Empty = ANDROID_HOME / ANDROID_SDK_ROOT"),
             SettingDef("adbPath", "adb binary", SettingType.TEXT, description = "Empty = <sdk>/platform-tools/adb, then PATH"),
             SettingDef("androidCliPath", "android CLI binary", SettingType.TEXT, description = "Empty = PATH lookup"),
+            SettingDef("scrcpyPath", "scrcpy binary", SettingType.TEXT, description = "Optional. Empty = PATH lookup"),
             SettingDef("timeoutSeconds", "Command timeout (s)", SettingType.NUMBER, default = "60"),
         ),
     )

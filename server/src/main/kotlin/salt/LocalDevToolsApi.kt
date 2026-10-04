@@ -8,7 +8,7 @@ import java.nio.file.Files
 import java.util.concurrent.TimeUnit
 
 /** Runs the real `adb` and `android` binaries on this machine, configured by the "android" section settings. */
-class LocalDevToolsApi(private val settings: SettingsApi) : DevToolsApi {
+class LocalDevToolsApi(private val settings: SettingsApi, private val storage: SectionStorage) : DevToolsApi {
 
     override suspend fun listDevices(): List<Device> {
         val r = run(Tool.ADB, CommandRequest(listOf("devices", "-l")))
@@ -26,6 +26,49 @@ class LocalDevToolsApi(private val settings: SettingsApi) : DevToolsApi {
         return raw.stdout
     }
 
+    override suspend fun saveScreenshot(serial: String): String = withContext(Dispatchers.IO) {
+        val png = screenshot(serial)
+        // Output data (not system data): lives beside settings.json, not under sdata/.
+        val dir = File(storage.dir(Sections.android), "screenshots").also { it.mkdirs() }
+        val stamp = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyMMddHHmmss"))
+        File(dir, "$stamp-${serial.replace(Regex("[^A-Za-z0-9._-]"), "_")}.png").also { it.writeBytes(png) }.path
+    }
+
+    private class Tools(val sdk: String?, val adb: String, val android: String, val scrcpy: String)
+
+    /** Setting first, then the environment / PATH: the single place that decides which binaries run. */
+    private fun tools(s: Map<String, String>): Tools {
+        val sdk = s["sdkPath"]?.ifBlank { null } ?: System.getenv("ANDROID_HOME") ?: System.getenv("ANDROID_SDK_ROOT")
+        return Tools(
+            sdk,
+            s["adbPath"]?.ifBlank { null } ?: locate("adb", sdk?.let { "$it/platform-tools" }),
+            s["androidCliPath"]?.ifBlank { null } ?: locate("android", null),
+            s["scrcpyPath"]?.ifBlank { null } ?: locate("scrcpy", null),
+        )
+    }
+
+    override suspend fun openScrcpy(serial: String): String = withContext(Dispatchers.IO) {
+        require(Regex("[A-Za-z0-9._:-]+").matches(serial)) { "Invalid device serial" }
+        val t = tools(settings.getSettings(Sections.android.id))
+        if (!File(t.scrcpy).canExecute()) error("scrcpy not found. Install it (for example brew install scrcpy) or set its path in Android settings.")
+        // Detached: the scrcpy window outlives this request and is closed from its own window.
+        ProcessBuilder(t.scrcpy, "-s", serial)
+            .redirectInput(File("/dev/null")).redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD)
+            .apply { environment()["ADB"] = t.adb }
+            .start()
+        "Started scrcpy for $serial"
+    }
+
+    override suspend fun resolvedPaths(): Map<String, String> = withContext(Dispatchers.IO) {
+        val t = tools(settings.getSettings(Sections.android.id))
+        mapOf(
+            "sdkPath" to t.sdk.orEmpty().takeIf { File(it).isDirectory }.orEmpty(),
+            "adbPath" to t.adb.takeIf { File(it).canExecute() }.orEmpty(),
+            "androidCliPath" to t.android.takeIf { File(it).canExecute() }.orEmpty(),
+            "scrcpyPath" to t.scrcpy.takeIf { File(it).canExecute() }.orEmpty(),
+        )
+    }
+
     private enum class Tool { ADB, ANDROID }
 
     private class Raw(val label: String, val exitCode: Int, val stdout: ByteArray, val stderr: ByteArray)
@@ -37,11 +80,9 @@ class LocalDevToolsApi(private val settings: SettingsApi) : DevToolsApi {
 
     private suspend fun exec(tool: Tool, request: CommandRequest): Raw {
         val s = settings.getSettings(Sections.android.id)
-        val sdk = s["sdkPath"]?.ifBlank { null } ?: System.getenv("ANDROID_HOME") ?: System.getenv("ANDROID_SDK_ROOT")
-        val bin = when (tool) {
-            Tool.ADB -> s["adbPath"]?.ifBlank { null } ?: locate("adb", sdk?.let { "$it/platform-tools" })
-            Tool.ANDROID -> s["androidCliPath"]?.ifBlank { null } ?: locate("android", null)
-        }
+        val t = tools(s)
+        val sdk = t.sdk
+        val bin = if (tool == Tool.ADB) t.adb else t.android
         // The android CLI has no device selector; adb takes it as a leading -s.
         val args = (if (tool == Tool.ADB) request.serial?.let { listOf("-s", it) }.orEmpty() else emptyList()) + request.args
         val timeoutMs = (request.timeoutSeconds ?: s["timeoutSeconds"]?.toIntOrNull() ?: 60).coerceAtLeast(1) * 1000L

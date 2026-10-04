@@ -16,28 +16,6 @@ import java.util.concurrent.Executors
 import java.util.zip.GZIPInputStream
 import javax.net.ssl.SSLSocket
 
-/** Bounded in-memory log of captures. ponytail: not persisted; append to sdata/ if history across restarts matters. */
-class CaptureStore(private val max: Int = 500) {
-    private val items = ArrayDeque<Capture>()
-    private var nextId = 1L
-
-    @Synchronized fun add(request: RequestSpec, tunnel: Boolean = false): Long {
-        val id = nextId++
-        items.addLast(Capture(id, request, tunnel = tunnel))
-        if (items.size > max) items.removeFirst()
-        return id
-    }
-
-    @Synchronized fun complete(id: Long, response: ResponseSpec) {
-        val i = items.indexOfFirst { it.id == id }
-        if (i >= 0) items[i] = items[i].copy(response = response)
-    }
-
-    @Synchronized fun after(id: Long): List<Capture> = items.filter { it.id > id }
-
-    @Synchronized fun clear() = items.clear()
-}
-
 /** Talks to the real internet on behalf of both the proxy and the composer. */
 object Upstream {
     // Never follow redirects: a proxy must hand them to the client untouched.
@@ -86,7 +64,12 @@ private class ParsedRequest(val method: String, val target: String, val headers:
 }
 
 /** ponytail: HTTP/1.1 request-response only. No WebSocket/SSE streaming (responses are buffered), no HTTP/2 to the client. */
-class ProxyServer(private val store: CaptureStore, private val mitm: Mitm?) {
+class ProxyServer(
+    private val store: CaptureStore,
+    private val mitm: Mitm?,
+    /** Read on every request, so rule edits apply to the running proxy. */
+    private val rules: () -> List<MockRule> = { emptyList() },
+) {
     private var server: ServerSocket? = null
     private val pool = Executors.newVirtualThreadPerTaskExecutor()
 
@@ -144,17 +127,31 @@ class ProxyServer(private val store: CaptureStore, private val mitm: Mitm?) {
     private fun respond(req: ParsedRequest, out: OutputStream, scheme: String, authority: String?) {
         val host = (authority ?: req.header("host")).orEmpty().removeSuffix(":443")
         val url = if (req.target.startsWith("http")) req.target else "$scheme://$host${req.target}"
-        val id = store.add(RequestSpec(req.method, url, req.headers, Upstream.bodyText(req.headers, req.body)))
+        val spec = RequestSpec(req.method, url, req.headers, Upstream.bodyText(req.headers, req.body))
+        val rule = rules().firstMatch(spec)
+        val id = store.add(spec)
         try {
-            val raw = Upstream.exchange(req.method, url, req.headers, req.body)
-            store.complete(id, Upstream.toSpec(raw))
+            val raw = when (rule?.action) {
+                MockAction.MOCK -> {
+                    Thread.sleep(rule.delayMs.coerceIn(0, 60_000))
+                    // The body is plain text, so a leftover Content-Encoding would make the client misread it.
+                    Upstream.Raw(rule.status, rule.headers.filter { !it.name.equals("content-encoding", true) }, rule.body.toByteArray(), rule.delayMs)
+                }
+                MockAction.BLOCK -> Upstream.Raw(403, listOf(Header("Content-Type", "text/plain")), "Blocked by Salt rule: ${rule.name.ifBlank { rule.id }}".toByteArray(), 0)
+                MockAction.MAP_REMOTE -> {
+                    Thread.sleep(rule.delayMs.coerceIn(0, 60_000))
+                    Upstream.exchange(req.method, mapRemoteUrl(url, rule.target) ?: error("Map Remote target is not a URL: ${rule.target}"), req.headers, req.body)
+                }
+                null -> Upstream.exchange(req.method, url, req.headers, req.body)
+            }
+            store.complete(id, Upstream.toSpec(raw), mocked = rule?.id)
             val hopByHop = setOf("connection", "transfer-encoding", "content-length", "keep-alive")
             val head = StringBuilder("HTTP/1.1 ${raw.status} \r\n")
             raw.headers.filter { it.name.lowercase() !in hopByHop && !it.name.startsWith(":") }.forEach { head.append("${it.name}: ${it.value}\r\n") }
             head.append("Content-Length: ${raw.body.size}\r\nConnection: keep-alive\r\n\r\n")
             out.write(head.toString().toByteArray()); out.write(raw.body); out.flush()
         } catch (e: Exception) {
-            store.complete(id, ResponseSpec(error = e.message ?: e.javaClass.simpleName))
+            store.complete(id, ResponseSpec(error = e.message ?: e.javaClass.simpleName), mocked = rule?.id)
             val msg = "salt proxy: ${e.message}".toByteArray()
             out.write("HTTP/1.1 502 Bad Gateway\r\nContent-Length: ${msg.size}\r\nConnection: close\r\n\r\n".toByteArray() + msg); out.flush()
         }

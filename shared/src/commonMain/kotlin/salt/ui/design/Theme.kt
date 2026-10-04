@@ -41,33 +41,33 @@ private val LightSalt = SaltColors(Color(0xFF1B7F3B), Color(0xFF8A5A00), Color(0
 private val DarkSalt = SaltColors(Color(0xFF6FD79A), Color(0xFFF0C050), Color(0xFF8AB4FF), Color(0xFFFFB4AB), Color(0xFFC7C5D0))
 
 private val LightScheme = lightColorScheme(
-    primary = Color(0xFF4355B9), onPrimary = Color.White,
-    primaryContainer = Color(0xFFDEE0FF), onPrimaryContainer = Color(0xFF00105C),
-    secondary = Color(0xFF5B5D72), onSecondary = Color.White,
-    secondaryContainer = Color(0xFFE0E1F9), onSecondaryContainer = Color(0xFF181A2C),
+    primary = Color(0xFF0B6E78), onPrimary = Color.White,
+    primaryContainer = Color(0xFFCDEBEC), onPrimaryContainer = Color(0xFF00262A),
+    secondary = Color(0xFF4A6366), onSecondary = Color.White,
+    secondaryContainer = Color(0xFFCCE5E8), onSecondaryContainer = Color(0xFF051F22),
     tertiary = Color(0xFF77536D), onTertiary = Color.White,
-    background = Color(0xFFFEFBFF), onBackground = Color(0xFF1B1B1F),
-    surface = Color(0xFFFEFBFF), onSurface = Color(0xFF1B1B1F),
-    surfaceVariant = Color(0xFFE3E1EC), onSurfaceVariant = Color(0xFF46464F),
-    outline = Color(0xFF777680), outlineVariant = Color(0xFFC7C5D0),
+    background = Color(0xFFF7FAFA), onBackground = Color(0xFF181C1D),
+    surface = Color(0xFFF7FAFA), onSurface = Color(0xFF181C1D),
+    surfaceVariant = Color(0xFFDAE4E5), onSurfaceVariant = Color(0xFF3F484A),
+    outline = Color(0xFF6F797B), outlineVariant = Color(0xFFBFC8CA),
     error = Color(0xFFBA1A1A), onError = Color.White,
-    surfaceContainerLowest = Color.White, surfaceContainerLow = Color(0xFFF7F2FA),
-    surfaceContainer = Color(0xFFF1EDF5), surfaceContainerHigh = Color(0xFFEBE7EF), surfaceContainerHighest = Color(0xFFE5E1E9),
+    surfaceContainerLowest = Color.White, surfaceContainerLow = Color(0xFFF0F5F5),
+    surfaceContainer = Color(0xFFEAEFEF), surfaceContainerHigh = Color(0xFFE4E9EA), surfaceContainerHighest = Color(0xFFDEE3E4),
 )
 
 private val DarkScheme = darkColorScheme(
-    primary = Color(0xFFBBC3FF), onPrimary = Color(0xFF08218A),
-    primaryContainer = Color(0xFF293CA0), onPrimaryContainer = Color(0xFFDEE0FF),
-    secondary = Color(0xFFC4C5DD), onSecondary = Color(0xFF2D2F42),
-    secondaryContainer = Color(0xFF434559), onSecondaryContainer = Color(0xFFE0E1F9),
+    primary = Color(0xFF6FD3DE), onPrimary = Color(0xFF00363B),
+    primaryContainer = Color(0xFF004F56), onPrimaryContainer = Color(0xFFCDEBEC),
+    secondary = Color(0xFFB1CBCE), onSecondary = Color(0xFF1C3437),
+    secondaryContainer = Color(0xFF334B4E), onSecondaryContainer = Color(0xFFCCE5E8),
     tertiary = Color(0xFFE6BAD7), onTertiary = Color(0xFF44263D),
-    background = Color(0xFF131318), onBackground = Color(0xFFE4E1E6),
-    surface = Color(0xFF131318), onSurface = Color(0xFFE4E1E6),
-    surfaceVariant = Color(0xFF46464F), onSurfaceVariant = Color(0xFFC7C5D0),
-    outline = Color(0xFF90909A), outlineVariant = Color(0xFF46464F),
+    background = Color(0xFF0F1415), onBackground = Color(0xFFDEE3E4),
+    surface = Color(0xFF0F1415), onSurface = Color(0xFFDEE3E4),
+    surfaceVariant = Color(0xFF3F484A), onSurfaceVariant = Color(0xFFBFC8CA),
+    outline = Color(0xFF899294), outlineVariant = Color(0xFF3F484A),
     error = Color(0xFFFFB4AB), onError = Color(0xFF690005),
-    surfaceContainerLowest = Color(0xFF0E0E13), surfaceContainerLow = Color(0xFF1B1B20),
-    surfaceContainer = Color(0xFF1F1F25), surfaceContainerHigh = Color(0xFF2A292F), surfaceContainerHighest = Color(0xFF35343A),
+    surfaceContainerLowest = Color(0xFF0A0F10), surfaceContainerLow = Color(0xFF171D1E),
+    surfaceContainer = Color(0xFF1B2122), surfaceContainerHigh = Color(0xFF252B2C), surfaceContainerHighest = Color(0xFF303637),
 )
 
 /** Material 3 type scale, tightened one step for a dense desktop tool. */

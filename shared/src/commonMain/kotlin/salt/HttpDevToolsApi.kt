@@ -39,15 +39,24 @@ class HttpDevToolsApi(private val baseUrl: String) : Services {
     override suspend fun androidCli(request: CommandRequest): CommandResult = post(ApiPaths.ANDROID, request)
     override suspend fun screenshot(serial: String): ByteArray = get("${ApiPaths.SCREENSHOT}/$serial")
 
+    override suspend fun openScrcpy(serial: String): String = client.post("$baseUrl${ApiPaths.SCRCPY}/$serial").body()
+    override suspend fun resolvedPaths(): Map<String, String> = get(ApiPaths.RESOLVED)
+    override suspend fun saveScreenshot(serial: String): String = client.post("$baseUrl${ApiPaths.SCREENSHOT}/$serial/save").body()
+
     override suspend fun getSettings(sectionId: String): Map<String, String> = get("${ApiPaths.SETTINGS}/$sectionId")
     override suspend fun saveSettings(sectionId: String, values: Map<String, String>): Map<String, String> =
         put("${ApiPaths.SETTINGS}/$sectionId", values)
 
     override suspend fun proxyStatus(): ProxyStatus = get(NetworkPaths.STATUS)
     override suspend fun setProxy(running: Boolean): ProxyStatus = put(NetworkPaths.PROXY, ProxyToggle(running))
-    override suspend fun captures(after: Long): List<Capture> = get("${NetworkPaths.CAPTURES}?after=$after")
+    override suspend fun captures(after: Long): List<CaptureRow> = get("${NetworkPaths.CAPTURES}?after=$after")
+    override suspend fun capture(id: Long): Capture? = runCatching { get<Capture>("${NetworkPaths.CAPTURE}/$id") }.getOrNull()
     override suspend fun clearCaptures() { client.delete(baseUrl + NetworkPaths.CAPTURES) }
-    override suspend fun send(request: RequestSpec): ResponseSpec = post(NetworkPaths.SEND, request)
+    override suspend fun send(request: RequestSpec): Capture = post(NetworkPaths.SEND, request)
     override suspend fun savedRequests(): List<SavedRequest> = get(NetworkPaths.SAVED)
     override suspend fun saveRequests(all: List<SavedRequest>) { put<Unit, _>(NetworkPaths.SAVED, all) }
+    override suspend fun mockRules(): List<MockRule> = get(NetworkPaths.MOCKS)
+    override suspend fun saveMockRules(all: List<MockRule>) { put<Unit, _>(NetworkPaths.MOCKS, all) }
+    override suspend fun environments(): Environments = get(NetworkPaths.ENVS)
+    override suspend fun saveEnvironments(all: Environments) { put<Unit, _>(NetworkPaths.ENVS, all) }
 }

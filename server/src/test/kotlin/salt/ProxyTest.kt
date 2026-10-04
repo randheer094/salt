@@ -38,13 +38,53 @@ class ProxyTest {
             assertEquals("got:hello", res.body())
 
             val c = store.after(0).single()
-            assertEquals("POST", c.request.method)
-            assertEquals(url, c.request.url)
-            assertEquals("hello", c.request.body)
-            assertEquals(201, c.response?.status)
-            assertTrue(c.response!!.body.endsWith("hello"))
+            assertEquals("POST", c.method)
+            assertEquals(url, c.url)
+            assertEquals(201, c.status)
+            val full = store.get(c.id)!!
+            assertEquals("hello", full.request.body)
+            assertTrue(full.response!!.body.endsWith("hello"))
         } finally {
             proxy.stop(); origin.stop(0)
+        }
+    }
+
+    @Test
+    fun rulesMockMapAndBlockWithoutTouchingTheRealServerWhereTheyShouldNot() {
+        var hits = 0
+        fun origin(label: String) = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).apply {
+            createContext("/") { ex ->
+                hits++
+                ex.sendResponseHeaders(200, label.length.toLong())
+                ex.responseBody.use { it.write(label.toByteArray()) }
+            }
+            start()
+        }
+        val real = origin("real"); val staging = origin("staging")
+        val store = CaptureStore()
+        val rules = listOf(
+            MockRule("m", name = "fake", url = "127.0.0.1:${real.address.port}/mocked", status = 418, body = "teapot", headers = listOf(Header("X-Mock", "1"))),
+            MockRule("r", action = MockAction.MAP_REMOTE, url = "127.0.0.1:${real.address.port}/mapped", target = "http://127.0.0.1:${staging.address.port}"),
+            MockRule("b", action = MockAction.BLOCK, url = "127.0.0.1:${real.address.port}/blocked"),
+            MockRule("off", enabled = false, url = "127.0.0.1:${real.address.port}/plain", body = "never"),
+        )
+        val proxy = ProxyServer(store, mitm = null) { rules }
+        val port = ServerSocket(0).use { it.localPort }
+        proxy.start(port)
+        try {
+            val client = HttpClient.newBuilder().proxy(ProxySelector.of(InetSocketAddress("127.0.0.1", port))).build()
+            fun get(path: String) = client.send(
+                HttpRequest.newBuilder(URI.create("http://127.0.0.1:${real.address.port}$path")).build(), HttpResponse.BodyHandlers.ofString(),
+            )
+            val mocked = get("/mocked")
+            assertEquals(418, mocked.statusCode()); assertEquals("teapot", mocked.body()); assertEquals("1", mocked.headers().firstValue("x-mock").get())
+            assertEquals(0, hits)                                 // answered locally
+            assertEquals("staging", get("/mapped").body())        // rerouted
+            assertEquals(403, get("/blocked").statusCode())
+            assertEquals("real", get("/plain").body())            // disabled rule ignored
+            assertEquals(listOf("m", "r", "b", null), store.after(0).map { it.mocked })
+        } finally {
+            proxy.stop(); real.stop(0); staging.stop(0)
         }
     }
 

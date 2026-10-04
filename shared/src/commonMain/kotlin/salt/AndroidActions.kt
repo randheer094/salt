@@ -33,6 +33,12 @@ object AndroidActions {
     fun installApk(serial: String, hostPath: String) =
         adb(serial, "install", "-r", "-t", hostPath, timeoutSeconds = 300)
 
+    fun tap(serial: String, x: Int, y: Int) = adb(serial, "shell", "input", "tap", x.toString(), y.toString())
+
+    /** A swipe from (x1, y1) to (x2, y2); with the same point twice it is a long press. */
+    fun swipe(serial: String, x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Int) =
+        adb(serial, "shell", "input", "swipe", x1.toString(), y1.toString(), x2.toString(), y2.toString(), durationMs.toString())
+
     fun keyEvent(serial: String, key: String) = adb(serial, "shell", "input", "keyevent", key)
 
     fun typeText(serial: String, text: String) =
@@ -126,20 +132,28 @@ fun parseSdkPackages(output: String): List<SdkPackage> = output.lineSequence().m
 }.toList()
 
 /** A one-tap developer setting. [on]/[off] are lists of `adb shell` commands. */
-class Toggle(val label: String, val hint: String, val on: List<List<String>>, val off: List<List<String>>)
+class Toggle(
+    val label: String, val hint: String, val on: List<List<String>>, val off: List<List<String>>,
+    /** Shell command whose output tells the current state; [isOn] reads that output. */
+    val probe: String, val isOn: (String) -> Boolean,
+)
 
-private fun settingToggle(label: String, hint: String, ns: String, key: String, on: String = "1", off: String = "0") =
-    Toggle(label, hint, listOf(listOf("settings", "put", ns, key, on)), listOf(listOf("settings", "put", ns, key, off)))
+private fun settingToggle(label: String, hint: String, ns: String, key: String, on: String = "1", off: String = "0") = Toggle(
+    label, hint, listOf(listOf("settings", "put", ns, key, on)), listOf(listOf("settings", "put", ns, key, off)),
+    "settings get $ns $key", { it.trim() == on },
+)
 
 val deviceToggles = listOf(
-    Toggle("Wi-Fi", "", listOf(listOf("svc", "wifi", "enable")), listOf(listOf("svc", "wifi", "disable"))),
-    Toggle("Mobile data", "", listOf(listOf("svc", "data", "enable")), listOf(listOf("svc", "data", "disable"))),
-    Toggle("Airplane mode", "Android 11+", listOf(listOf("cmd", "connectivity", "airplane-mode", "enable")), listOf(listOf("cmd", "connectivity", "airplane-mode", "disable"))),
-    Toggle("Dark mode", "", listOf(listOf("cmd", "uimode", "night", "yes")), listOf(listOf("cmd", "uimode", "night", "no"))),
+    Toggle("Wi-Fi", "", listOf(listOf("svc", "wifi", "enable")), listOf(listOf("svc", "wifi", "disable")), "settings get global wifi_on", { it.trim() == "1" || it.trim() == "2" }),
+    Toggle("Mobile data", "", listOf(listOf("svc", "data", "enable")), listOf(listOf("svc", "data", "disable")), "settings get global mobile_data", { it.trim() == "1" }),
+    Toggle("Airplane mode", "Android 11+", listOf(listOf("cmd", "connectivity", "airplane-mode", "enable")), listOf(listOf("cmd", "connectivity", "airplane-mode", "disable")), "settings get global airplane_mode_on", { it.trim() == "1" }),
+    Toggle("Dark mode", "", listOf(listOf("cmd", "uimode", "night", "yes")), listOf(listOf("cmd", "uimode", "night", "no")), "cmd uimode night", { it.contains("yes") }),
     Toggle(
         "Animations", "Off makes UI tests faster and steadier",
         listOf("window_animation_scale", "transition_animation_scale", "animator_duration_scale").map { listOf("settings", "put", "global", it, "1") },
         listOf("window_animation_scale", "transition_animation_scale", "animator_duration_scale").map { listOf("settings", "put", "global", it, "0") },
+        // "null" means never set, i.e. the default 1.0.
+        "settings get global animator_duration_scale", { it.trim() !in setOf("0", "0.0", "0.00") },
     ),
     settingToggle("Show taps", "", "system", "show_touches"),
     settingToggle("Pointer location", "Coordinates overlay", "system", "pointer_location"),
@@ -147,7 +161,22 @@ val deviceToggles = listOf(
     settingToggle("Don't keep activities", "Destroys activities on leave, to test state restoration", "global", "always_finish_activities"),
 )
 
-val fontScales = listOf("0.85", "1.0", "1.15", "1.3", "2.0")
+/** One adb call that prints `index=value` for every toggle, so opening the screen costs a single round trip. */
+fun readToggles(serial: String) =
+    CommandRequest(listOf("shell", deviceToggles.indices.joinToString("; ") { "echo $it=\$(${deviceToggles[it].probe})" }), serial)
+
+/** Current state per toggle index; a toggle missing from [output] stays unknown. */
+fun parseToggleStates(output: String): Map<Int, Boolean> = output.lineSequence().mapNotNull { line ->
+    val (i, v) = line.split("=", limit = 2).takeIf { it.size == 2 } ?: return@mapNotNull null
+    i.trim().toIntOrNull()?.let { idx -> deviceToggles.getOrNull(idx)?.let { idx to it.isOn(v) } }
+}.toMap()
+
+fun density(serial: String) = CommandRequest(listOf("shell", "wm", "density"), serial)
+
+/** `uiautomator dump` printed to stdout (the /dev/tty trick), for the layout inspector. */
+fun uiDump(serial: String) = CommandRequest(listOf("exec-out", "uiautomator", "dump", "/dev/tty"), serial, timeoutSeconds = 30)
+
+val fontScales =listOf("0.85", "1.0", "1.15", "1.3", "2.0")
 
 /** Fixed read-only reports for the Diagnostics tab. */
 val diagnostics = listOf(
@@ -161,12 +190,9 @@ val diagnostics = listOf(
     "Top processes" to "top -b -n 1 -m 15",
 )
 
-/** Highlights shown on the device info card, in display order. */
-val deviceInfoKeys = listOf(
-    "Manufacturer" to "ro.product.manufacturer",
-    "Model" to "ro.product.model",
-    "Android" to "ro.build.version.release",
-    "API level" to "ro.build.version.sdk",
-    "ABI" to "ro.product.cpu.abi",
-    "Build" to "ro.build.fingerprint",
-)
+/** One-line device summary, e.g. "Android 14 · API 34 · arm64-v8a". Missing properties are skipped. */
+fun deviceSummary(props: Map<String, String>): String = listOfNotNull(
+    props["ro.build.version.release"]?.takeIf { it.isNotBlank() }?.let { "Android $it" },
+    props["ro.build.version.sdk"]?.takeIf { it.isNotBlank() }?.let { "API $it" },
+    props["ro.product.cpu.abi"]?.takeIf { it.isNotBlank() },
+).joinToString(" · ")

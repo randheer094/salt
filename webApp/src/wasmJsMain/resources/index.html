@@ -3,9 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
     <title>Salt</title>
-    <style>html, body { margin: 0; height: 100%; }</style>
-    <script src="salt-web.js"></script>
+    <style>
+        /* Same background as the app theme, so nothing flashes white before the wasm UI paints. */
+        html, body { margin: 0; height: 100%; background: #F7FAFA; }
+        @media (prefers-color-scheme: dark) { html, body { background: #0F1415; } }
+    </style>
+    <script src="/salt-script.js"></script>
+    <script src="/salt-web.js"></script>
 </head>
 <body></body>
 </html>
