@@ -1,0 +1,22 @@
+# Gradle / Kotlin build output
+.gradle/
+.kotlin/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# kotlin-js-store/ holds the yarn lockfile for the wasm toolchain: commit it.
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+
+# Local config and secrets
+local.properties
+.env
+
+# Runtime data. Salt keeps it in ~/.salt, but SALT_HOME may point inside the repo.
+.salt/
